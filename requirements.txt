@@ -1,0 +1,10 @@
+pdf2image 
+pymupdf 
+openai 
+azure-search-documents==11.4.0 
+azure-ai-documentintelligence==1.0.2
+azure-storage-blob==12.22.0
+azure-identity
+msal
+fastapi
+uvicorn[standard]
