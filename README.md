@@ -103,26 +103,7 @@ Or run the interactive CLI:
 
 ---
 
-## 7. How it Works
-
-```mermaid
-graph TD
-    A[PDF white-paper] -->|Document Intelligence OCR| B[Section Headings]
-    A -->|Figure crop| C[PNG diagrams]
-    B & C -->|Azure OpenAI Vision GPT-4o| D[Service lists + summaries]
-    D -->|Embeddings| E[Cognitive Search (HNSW)]
-    C -->|Blob URL| E
-    subgraph Runtime
-        F(End-user query) --> G[Intake Agent GPT-4o]
-        G --tool: run_search--> E
-        E -->|Top-N docs| H(RAG prompt)
-        H --> G
-    end
-```
-
----
-
-## 8. Testing
+## 7. Testing
 To add unit tests place files under `tests/` and run:
 ```powershell
 > pytest
@@ -130,18 +111,18 @@ To add unit tests place files under `tests/` and run:
 
 ---
 
-## 9. Troubleshooting
+## 8. Troubleshooting
 * `azure.core.exceptions.HttpResponseError`: check that your service principal has *Cognitive Search Data Contributor* & *Storage Blob Data Contributor* roles.  
 * Empty search results – ensure embeddings dimensions match (3072 for `text-embedding-3-large`).  
 
 ---
 
-## 10. Roadmap / TODO
+## 9. Roadmap / TODO
 - [ ] Streamline secrets via Azure Key Vault  
 - [ ] Dockerfile & Bicep for one-click deploy  
 - [ ] Web front-end with diagram preview
 
 ---
 
-## 11. License
+## 10. License
 MIT (see [LICENSE](LICENSE)) – sample keys in the repo are **dummy values** and must be replaced.
