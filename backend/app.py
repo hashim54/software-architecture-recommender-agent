@@ -39,7 +39,7 @@ def query_endpoint(body: QueryRequest):
 
         # Call search
         try:
-            search_results = run_search(body.query, category_filter=None)
+            search_results_str, architecture_result_urls = run_search(body.query, category_filter=None)
         except Exception as ex:
             raise HTTPException(status_code=500, detail=f"Search failure: {ex}")
 
@@ -47,7 +47,7 @@ def query_endpoint(body: QueryRequest):
         try:
             assistant_response, history = get_rag_results(
             user_query=body.query,
-            search_results=search_results,
+            search_results=search_results_str,
             system_prompt=rag_system_prompt,
             conversation_history=history,
             )
@@ -56,7 +56,7 @@ def query_endpoint(body: QueryRequest):
 
     return QueryResponse(
         assistant_response=assistant_response,
-        search_results=search_results if assistant_response_tool else None,
+        search_results=search_results_str if assistant_response_tool else None,
         conversation_history=[Message(**m) for m in history],
     )
 
@@ -66,15 +66,32 @@ if __name__ == "__main__":
     #conversation_history = [{'role': 'user', 'content': 'I have a batc ingestion use case with reasonaly large data volumes. The batch process must run daily, ingest CSV files into a cloud data lake as is and be able to scale up and down. I am looking for an architecture that can help me with this use case. Can you help me with this?'}, {'role': 'assistant', 'content': 'Thank you for sharing the requirements! To ensure I provide you with the most suitable architecture recommendation for your batch ingestion use case, I need to gather a few more technical details:\n\n1. **Cloud Provider**: Do you have a preferred cloud provider (e.g., AWS, Azure, Google Cloud)?\n   \n2. **Data Lake**: Are you using a specific data lake service (e.g., Amazon S3, Azure Data Lake, Google Cloud Storage) or is this flexible?\n\n3. **Data Volume**: When you say "reasonably large data volumes," could you provide an estimate (e.g., GB per file, total GB per day)?\n\n4. **File Format**: Are the CSV files structured consistently or do they vary in schema? Are there any specific transformations needed post-ingestion?\n\n5. **Processing Framework**: Do you have a preference for a processing framework (e.g., Apache Spark, serverless options like AWS Lambda, or others)?\n\n6. **Cost Efficiency**: Is cost optimization a primary concern, or is performance/scalability the priority?\n\n7. **Security & Compliance**: Any specific compliance or security requirements (e.g., encryption, IAM policies)?\n\n8. **Future Needs**: Do you foresee needing to process data in real-time in the future, or is this strictly for batch processing?\n\nProviding these details will help me find the most appropriate architecture recommendation for your use case!'}]
     #user_query = "Yes, my preferred cloud provider is Azure. I am using Azure Data Lake and the data volume is around 1TB per day. The files are structured consistently and I do not need any transformations. I would prefer a serverless option for processing. Cost efficiency is a primary concern for me. I do not have any specific compliance or security requirements. I do not foresee needing to process data in real-time in the future."
     conversation_history = []
-    user_query = "What is the architecture of Azure OpenAI?"
-    response = query_endpoint(QueryRequest( 
-        query=user_query,
-        conversation_history=conversation_history 
-    )) 
-    if response.search_results:
-        print("RAG Results:")
-        print(response.assistant_response)
-    else:
-        print("Intake Agent Follow-up:")
-        print(response.assistant_response)
+    #user_query = "I have a batc ingestion use case with reasonaly large data volumes. The batch process must run daily, ingest CSV files into a cloud data lake as is and be able to scale up and down. I am looking for an architecture that can help me with this use case. Can you help me with this?"
      
+    while True:
+        user_query = input("You > ").strip()
+        # call backend
+        resp = query_endpoint(
+            QueryRequest(query=user_query, conversation_history=conversation_history)
+        )
+        
+        if resp.search_results:
+            prefix = "RAG Results:"
+            print(f"\n{prefix}\n{resp.assistant_response}\n")
+            conversation_history.extend(
+            [
+                {"role": "user", "content": user_query},
+                {"role": "assistant", "content": resp.assistant_response},
+            ]
+        )
+            break
+        else:
+            prefix = "Intake Agent:"
+            # update history for the next round
+            conversation_history.extend(
+            [
+                {"role": "user", "content": user_query},
+                {"role": "assistant", "content": resp.assistant_response},
+            ]
+        )
+            print(f"\n{prefix}\n{resp.assistant_response}\n")

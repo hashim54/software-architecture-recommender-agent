@@ -1,1 +1,147 @@
-# software-architecture-generator-agent
+# Software Architecture Recommender Agent
+
+Generate, index and search cloud architecture diagrams with RAG-powered chat.
+
+---
+
+## 1. Project Overview
+This repo contains two main workflows:
+
+| Module | Purpose |
+|--------|---------|
+| **scripts/**[`create_and_upload_index.py`](software-architecture-generator-agent/scripts/create_and_upload_index.py) | • Extract text + figures from PDF architecture white-papers<br>• Summarise every diagram with Azure OpenAI Vision<br>• Build vector embeddings and publish both images & metadata to Azure Cognitive Search + Blob Storage |
+| **backend/** | FastAPI service that exposes a conversational **Intake Agent** which: <br>1. Collects user requirements<br>2. Runs hybrid semantic+vector search over the indexed diagrams<br>3. Uses RAG to explain how the closest architecture fits the use-case |
+
+---
+
+## 2. Key Features
+* OCR + layout extraction with Azure Document Intelligence  
+* Vision GPT prompt to summarise each diagram  
+* JSON-schema validated extraction of Azure / non-Azure services  
+* HNSW vector index (3072-dim OpenAI embeddings) + semantic ranking  
+* Confidential upload of diagram PNGs to Azure Blob Storage  
+* Tool-calling chat agent that decides when to trigger search vs. keep asking follow-up questions  
+
+---
+
+## 3. Directory Structure
+```
+software-architecture-generator-agent/
+├─ backend/          # FastAPI + agents
+├─ scripts/          # one-off data-pipeline
+├─ data/             # local cache (PDFs, split_pages/, figures/)
+├─ requirements.txt
+└─ README.md            # (this file)
+```
+
+---
+
+## 4. Quick Start
+
+### 4.1 Prerequisites
+* Python 3.10+  
+* Azure subscription with:
+  * Azure Cognitive Search
+  * Azure Blob Storage
+  * Azure OpenAI (GPT-4o + Embedding deployment)
+  * Azure AI Document Intelligence (Layout model)
+
+### 4.2 Installation
+```powershell
+# Windows (PowerShell)
+> python -m venv .venv
+> .\.venv\Scripts\activate
+> pip install -r requirements.txt
+```
+
+### 4.3 Configuration
+Store secrets as environment variables or in a `.env` file **never commit keys**.
+
+| Variable | Description |
+|----------|-------------|
+| `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_KEY`, `AZURE_OPENAI_DEPLOYMENT`, `Azure_OpenAI_Embedding_Deployment_Name` |
+| `AZURE_SEARCH_ENDPOINT`, `AZURE_SEARCH_ADMIN_KEY`, `AZURE_SEARCH_INDEX` |
+| `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_CONTAINER` |
+| `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`, `AZURE_DOCUMENT_INTELLIGENCE_KEY` |
+| `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` |
+
+---
+
+## 5. Building the Vector Index
+```powershell
+# Edit scripts/create_and_upload_index.py → fill <credentials> + input PDF
+> python scripts\create_and_upload_index.py
+```
+The script will:
+1. Split each PDF page & detect figure bounding boxes  
+2. Export diagrams to `data/figures/` & `data/split_pages/`  
+3. Extract service lists & AI summaries  
+4. Upload PNGs to Blob Storage  
+5. Create / update the Cognitive Search index and push documents  
+
+---
+
+## 6. Running the Intake-Agent API
+```powershell
+> cd backend
+> uvicorn app:query_endpoint --reload  # dev
+```
+Call the endpoint programmatically:
+```python
+import requests, json
+body = {
+  "query": "I need a batch ingestion pipeline on Azure Data Lake (1 TB/day)…",
+  "conversation_history": []
+}
+resp = requests.post("http://127.0.0.1:8000/query", json=body).json()
+print(resp["assistant_response"])
+```
+Or run the interactive CLI:
+```powershell
+> python app.py
+```
+
+---
+
+## 7. How it Works
+
+```mermaid
+graph TD
+    A[PDF white-paper] -->|Document Intelligence OCR| B[Section Headings]
+    A -->|Figure crop| C[PNG diagrams]
+    B & C -->|Azure OpenAI Vision GPT-4o| D[Service lists + summaries]
+    D -->|Embeddings| E[Cognitive Search (HNSW)]
+    C -->|Blob URL| E
+    subgraph Runtime
+        F(End-user query) --> G[Intake Agent GPT-4o]
+        G --tool: run_search--> E
+        E -->|Top-N docs| H(RAG prompt)
+        H --> G
+    end
+```
+
+---
+
+## 8. Testing
+To add unit tests place files under `tests/` and run:
+```powershell
+> pytest
+```
+
+---
+
+## 9. Troubleshooting
+* `azure.core.exceptions.HttpResponseError`: check that your service principal has *Cognitive Search Data Contributor* & *Storage Blob Data Contributor* roles.  
+* Empty search results – ensure embeddings dimensions match (3072 for `text-embedding-3-large`).  
+
+---
+
+## 10. Roadmap / TODO
+- [ ] Streamline secrets via Azure Key Vault  
+- [ ] Dockerfile & Bicep for one-click deploy  
+- [ ] Web front-end with diagram preview
+
+---
+
+## 11. License
+MIT (see [LICENSE](LICENSE)) – sample keys in the repo are **dummy values** and must be replaced.

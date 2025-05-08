@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 from pdf2image import convert_from_path
 import fitz
 from azure.core.credentials import AzureKeyCredential
@@ -47,16 +48,17 @@ out_page_dir.mkdir(parents=True, exist_ok=True)
 out_fig_dir = data_dir / "figures"
 out_fig_dir.mkdir(parents=True, exist_ok=True)
 
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 #configure service connections
-endpoint = ""
-key       = ""
+endpoint = os.environ["Azure_Document_Intelligence_Endpoint"]#
+key       = os.environ["Azure_Document_Intelligence_Key"]#
 adi_client = DocumentIntelligenceClient(endpoint, AzureKeyCredential(key))
 
-aoai_endpoint   = ""
-aoai_key        = ""
-aoai_deployment = ""                      
-api_version     = ""  
-
+aoai_endpoint   = os.environ["Azure_OpenAI_Endpoint"]#
+aoai_key        = os.environ["Azure_OpenAI_Key"]#
+aoai_deployment = "gpt-4o"                      
+api_version     = "2024-12-01-preview"  
 
 aoai_client = AzureOpenAI(
     api_key=aoai_key,
@@ -64,10 +66,10 @@ aoai_client = AzureOpenAI(
     api_version=api_version,
 )
 
-search_endpoint = ""      # e.g. https://<search>.search.windows.net
-search_admin_key = ""     # Admin key
-index_name = ""                       # change as needed
-embedding_deployment = ""          # your AOAI embedding deployment
+search_endpoint = os.environ["Azure_Search_Endpoint"]
+search_admin_key = os.environ["Azure_Search_Key"]
+index_name = os.environ["Azure_Search_Index_Name"]
+embedding_deployment = os.environ["Azure_OpenAI_Embedding_Deployment_Name"]
 vector_config = "arch-hnsw"
 azure_openai_embedding_dimensions = 3072
 
@@ -75,9 +77,9 @@ cred          = AzureKeyCredential(search_admin_key)
 index_client  = SearchIndexClient(search_endpoint, cred)
 
 # Blob Service Principal credentials
-tenant_id = ""  
-client_id = ""
-client_secret = ""
+tenant_id = os.environ["Azure_Blob_SP_Tenant_Id"] 
+client_id = os.environ["Azure_Blob_SP_Client_Id"]
+client_secret = os.environ["Azure_Blob_SP_Client_Secret"]
 authority = f"https://login.microsoftonline.com/{tenant_id}"
 scope = ["https://storage.azure.com/.default"]
 
@@ -105,10 +107,8 @@ class BearerTokenCredential:
 credential = BearerTokenCredential(access_token)
 
 # Azure Storage account details
-storage_account_name = ""  # Replace with your Storage Account name
-container_name = ""
-#blob_credential = ClientSecretCredential(tenant_id, client_id, client_secret)
-#blob_credential = DefaultAzureCredential()
+storage_account_name = os.environ["Azure_Blob_Storage_Account_Name"]
+container_name = os.environ["Azure_Blob_Container_Name"]
 blob_service_client = BlobServiceClient(
     account_url=f"https://{storage_account_name}.blob.core.windows.net",
     credential=credential

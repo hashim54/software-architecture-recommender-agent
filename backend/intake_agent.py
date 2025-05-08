@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 from azure.core.credentials import AzureKeyCredential
 from pydantic import BaseModel
 from typing import List, Dict, Any
@@ -14,12 +15,14 @@ from azure.core.credentials import AzureKeyCredential, AccessToken
 import uuid
 from copy import deepcopy
 
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 
 #configure service connections
-aoai_endpoint   = ""
-aoai_key        = ""
-aoai_deployment = ""                      
-api_version     = ""  
+aoai_endpoint   = os.environ["Azure_OpenAI_Endpoint"]
+aoai_key        = os.environ["Azure_OpenAI_Key"]
+aoai_deployment = "gpt-4o"                      
+api_version     = "2024-12-01-preview"  
 
 
 aoai_client = AzureOpenAI(
@@ -28,11 +31,11 @@ aoai_client = AzureOpenAI(
     api_version=api_version,
 )
 
-search_endpoint = ""      # e.g. https://<search>.search.windows.net
-search_admin_key = ""     # 
-index_name = ""                       # change as needed
-embedding_deployment = ""          # your AOAI embedding deployment
-vector_config = ""
+search_endpoint = os.environ["Azure_Search_Endpoint"]
+search_admin_key = os.environ["Azure_Search_Key"]
+index_name = os.environ["Azure_Search_Index_Name"]
+embedding_deployment = os.environ["Azure_OpenAI_Embedding_Deployment_Name"]
+vector_config = "arch-hnsw"
 azure_openai_embedding_dimensions = 3072
 
 search_client = SearchClient(
@@ -75,7 +78,7 @@ tools = [
     }
 ]
 
-def run_search(search_query: str, category_filter: str | None = None) -> str:
+def run_search(search_query: str, category_filter: str | None = None) -> Tuple[str, List[Dict[str, str]]]:
     """
     Perform a search using Azure Cognitive Search with both semantic and vector queries.
     Returns the results as a formatted string.
@@ -110,6 +113,7 @@ def run_search(search_query: str, category_filter: str | None = None) -> str:
     
     # Format the search results into a string
     output_parts = ["\n=== Search Results ==="]
+    architecture_result_urls = []
     for i, result in enumerate(results, 1):
         result_parts = [
             f"\nResult #{i}",
@@ -125,9 +129,10 @@ def run_search(search_query: str, category_filter: str | None = None) -> str:
             "<End Content>"
         ]
         output_parts.extend(result_parts)
+        architecture_result_urls.append({"name": result['name'], "architecture_url": result['architecture_url']})
     
     formatted_output = "\n".join(output_parts)
-    return formatted_output
+    return formatted_output, architecture_result_urls
 
 def get_rag_results(user_query: str, search_results: str, system_prompt: str, conversation_history: List[Dict[str, str]]) -> Tuple[str, List[Dict[str, str]]]:
     """
@@ -221,9 +226,9 @@ if __name__ == "__main__":
     assistant_response, history, assistant_response_tool = chat_with_intake_agent(user_query, conversation_history)
     print("\n=== Assistant Response ===")
     print(assistant_response)
-    search_query = run_search(search_query=assistant_response_tool["user_query"], category_filter=None)
+    search_result_str, architecture_result_urls = run_search(search_query=assistant_response_tool["user_query"], category_filter=None)
     print("\n=== RAG Results ===")
-    rag_result, history = get_rag_results(user_query=assistant_response_tool["user_query"], search_results=search_query, system_prompt=rag_system_prompt, conversation_history=history)
+    rag_result, history = get_rag_results(user_query=assistant_response_tool["user_query"], search_results=search_result_str, system_prompt=rag_system_prompt, conversation_history=history)
     print(rag_result)
     print("\n=== Updated Conversation History ===")
     for entry in history:
