@@ -123,6 +123,7 @@ To add unit tests place files under `tests/` and run:
 - Dockerfile & Bicep for one-click deploy
 - Enhancement of the prompts used in the document cracking script for more accurate and detailed extraction of the architecture diagrams
 - Web front-end with diagram preview
+- Integrating the architecture recommender system with automation scripts so that the agent does not only find the closest architecture match but also triggers its build out. 
 
 ---
 
