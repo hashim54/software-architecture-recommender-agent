@@ -223,12 +223,12 @@ def get_ocr_from_adi(file_path: str):
     section_heading_text = "\n".join(section_headings) 
 
     fig_bounding_boxes = []
-    for fig in getattr(result, "figures", []):
+    for fig in (getattr(result, "figures", None) or []):
         caption = getattr(fig, "caption", None)
         bounding_box = fig["boundingRegions"][0]
         fig_bounding_boxes.append(bounding_box)
-    if caption and getattr(caption, "content", None):
-        section_headings.append(caption.content)
+        if caption and getattr(caption, "content", None):
+            section_headings.append(caption.content)
 
     return section_headings, fig_bounding_boxes, result
 
@@ -404,22 +404,23 @@ if __name__ == "__main__":
     print("Creating or updating search index...")
     create_or_update_search_index()
     print("Beginning data pipeline...")
-    file_name = "SMR-Service Bus - Present Integration Patterns-220425-130130.pdf"
-    file_path = data_dir / file_name
-    section_headings, fig_bounding_boxes, result = get_ocr_from_adi(str(file_path))
-    pdf_to_pngs(file_path, out_fig_dir, out_page_dir, dpi=300)
-    extracted_architectures = architecture_extraction_with_ocr(
-        ocr_content=result.content,
-        section_headings=section_headings,
-        architecture_extraction_system_prompt=architecture_extraction_system_prompt
-    )
-    architecture_ai_summaries = architecture_ai_summaries_with_images(
-        pdf_path=file_path,
-        file_name=file_name,
-        system_prompt_arch_summary=system_prompt_arch_summary
-    )
-    build_and_push_docs(
-        arch_items=extracted_architectures,
-        summaries=architecture_ai_summaries, 
-        file_name=file_name
-    )
+    for file_name in os.listdir(data_dir):
+        if file_name.endswith(".pdf"):
+            file_path = data_dir / file_name
+            section_headings, fig_bounding_boxes, result = get_ocr_from_adi(str(file_path))
+            pdf_to_pngs(file_path, out_fig_dir, out_page_dir, dpi=300)
+            extracted_architectures = architecture_extraction_with_ocr(
+            ocr_content=result.content,
+            section_headings=section_headings,
+            architecture_extraction_system_prompt=architecture_extraction_system_prompt
+            )
+            architecture_ai_summaries = architecture_ai_summaries_with_images(
+            pdf_path=file_path,
+            file_name=file_name,
+            system_prompt_arch_summary=system_prompt_arch_summary
+            )
+            build_and_push_docs(
+            arch_items=extracted_architectures,
+            summaries=architecture_ai_summaries, 
+            file_name=file_name
+            )

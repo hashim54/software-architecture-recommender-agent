@@ -1,6 +1,8 @@
 # Software Architecture Recommender Agent
 
-Generate, index and search cloud architecture diagrams with RAG-powered chat.
+Software architects accumulate vast libraries of diagrams, white-papers, and Confluence pages from past projects.  
+When a new initiative kicks off they often comb through this unstructured content manually to find reusable patterns—a slow and error-prone task.  
+This repository shows how Large Language Models (LLMs) and agentic workflows can automate that research: it surfaces the closest-matching reference architectures and explains, in detail, how each one satisfies—or falls short of—the new project’s requirements.
 
 ---
 
@@ -15,11 +17,10 @@ This repo contains two main workflows:
 ---
 
 ## 2. Key Features
-* OCR + layout extraction with Azure Document Intelligence  
-* Vision GPT prompt to summarise each diagram  
-* JSON-schema validated extraction of Azure / non-Azure services  
-* HNSW vector index (3072-dim OpenAI embeddings) + semantic ranking  
-* Confidential upload of diagram PNGs to Azure Blob Storage  
+* OCR + Figure extraction with Azure Document Intelligence and GPT-4o 
+* GPT-4o to sumarize the extracted architecture diagrams
+
+* Upload of diagram PNGs to Azure Blob Storage  
 * Tool-calling chat agent that decides when to trigger search vs. keep asking follow-up questions  
 
 ---
@@ -41,7 +42,7 @@ software-architecture-generator-agent/
 ### 4.1 Prerequisites
 * Python 3.10+  
 * Azure subscription with:
-  * Azure Cognitive Search
+  * Azure AI Search
   * Azure Blob Storage
   * Azure OpenAI (GPT-4o + Embedding deployment)
   * Azure AI Document Intelligence (Layout model)
@@ -74,10 +75,10 @@ Store secrets as environment variables or in a `.env` file **never commit keys**
 ```
 The script will:
 1. Split each PDF page & detect figure bounding boxes  
-2. Export diagrams to `data/figures/` & `data/split_pages/`  
+2. Export pages and diagrams to `data/figures/` & `data/split_pages/`  
 3. Extract service lists & AI summaries  
 4. Upload PNGs to Blob Storage  
-5. Create / update the Cognitive Search index and push documents  
+5. Create / update the AI Search index and push json documents with embeddings  
 
 ---
 
@@ -118,9 +119,10 @@ To add unit tests place files under `tests/` and run:
 ---
 
 ## 9. Roadmap / TODO
-- [ ] Streamline secrets via Azure Key Vault  
-- [ ] Dockerfile & Bicep for one-click deploy  
-- [ ] Web front-end with diagram preview
+- Streamline secrets via Azure Key Vault  
+- Dockerfile & Bicep for one-click deploy
+- Enhancement of the prompts used in the document cracking script for more accurate and detailed extraction of the architecture diagrams
+- Web front-end with diagram preview
 
 ---
 
