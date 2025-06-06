@@ -1,10 +1,13 @@
-pdf2image 
-pymupdf 
-openai 
-azure-search-documents==11.4.0 
+pdf2image
+pymupdf
+openai
+azure-search-documents>=11.6.0b4
 azure-ai-documentintelligence==1.0.2
 azure-storage-blob==12.22.0
 azure-identity
+azure-ai-projects
+azure-ai-identity
 msal
 fastapi
 uvicorn[standard]
+semantic-kernel[azure]>=1.24.0
