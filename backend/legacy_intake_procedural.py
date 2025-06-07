@@ -40,14 +40,14 @@ class LegacyIntakeProcedural:
     def run_search(self, search_query: str, category_filter: str | None = None):
         # This is a placeholder. The actual implementation required global variables.
         # See previous code for details. Not functional as a method.
-        pass
+        raise NotImplementedError("The method run_search is not implemented yet.")
 
     def get_rag_results(self, user_query: str, search_results: str, system_prompt: str, conversation_history):
         # This is a placeholder. The actual implementation required global variables.
         # See previous code for details. Not functional as a method.
-        pass
+        raise NotImplementedError("The method get_rag_results is not implemented yet.")
 
     def chat_with_intake_agent(self, user_query: str, conversation_history):
         # This is a placeholder. The actual implementation required global variables.
         # See previous code for details. Not functional as a method.
-        pass
+        raise NotImplementedError("The method chat_with_intake_agent is not implemented yet.")
