@@ -58,7 +58,8 @@ class IntakeAgent:
                 endpoint=self.project_connection_string,
                 credential=credential
             )
-              # Find Azure AI Search connection
+            
+            # Find Azure AI Search connection
             ai_search_conn_id = self._find_search_connection()
             
             if not ai_search_conn_id:
@@ -148,19 +149,21 @@ class IntakeAgent:
                 role="user",
                 content=user_query
             )
-              # Create and poll run
+            
+            # Create and poll run
             run = self.client.agents.runs.create_and_process(
                 thread_id=thread_id,
                 agent_id=self.agent_id
             )
-            
             # Get the assistant's messages from the thread
             messages = self.client.agents.messages.list(thread_id=thread_id)
             
             assistant_response = "I'm sorry, I couldn't generate a response. Please try again."
-            if messages.data:
-                # Get the latest assistant message
-                for message in messages.data:
+            # Convert ItemPaged to list and get the latest assistant message
+            messages_list = list(messages)
+            if messages_list:
+                # Messages are typically returned in reverse chronological order (newest first)
+                for message in messages_list:
                     if message.role == "assistant":
                         # Extract text content from the message
                         for content in message.content:
