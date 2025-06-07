@@ -1,0 +1,51 @@
+{
+    "folders": [
+        {
+            "name": "Software Architecture Recommender Agent",
+            "path": "."
+        }
+    ],
+    "settings": {
+        "python.defaultInterpreter": "./.venv/Scripts/python.exe",
+        "python.terminal.activateEnvironment": true,
+        "python.envFile": "./.env"
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.vscode-pylance",
+            "ms-python.black-formatter",
+            "ms-python.flake8",
+            "ms-vscode.vscode-json"
+        ]
+    },
+    "launch": {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "Debug FastAPI App",
+                "type": "python",
+                "request": "launch",
+                "program": "./.venv/Scripts/uvicorn.exe",
+                "args": [
+                    "backend.app:app",
+                    "--reload",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "8000",
+                    "--log-level",
+                    "debug"
+                ],
+                "console": "integratedTerminal",
+                "envFile": "./.env",
+                "python": "./.venv/Scripts/python.exe",
+                "stopOnEntry": false,
+                "justMyCode": true,
+                "env": {
+                    "PYTHONPATH": "${workspaceFolder}"
+                }
+            }
+        ]
+    }
+}
