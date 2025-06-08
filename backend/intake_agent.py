@@ -1,239 +1,222 @@
+# Legacy procedural code has been moved to backend/legacy_intake_procedural.py for reference.
+
+# Azure AI Agent for software architecture recommendations using Azure AI Projects SDK
 import os
+import asyncio
+import logging
+from typing import Dict, Any, Optional
 from pathlib import Path
+
 from dotenv import load_dotenv
-from azure.core.credentials import AzureKeyCredential
-from pydantic import BaseModel
-from typing import List, Dict, Any
-from openai import AzureOpenAI
-import json
-import base64
-from typing import Tuple
-from azure.search.documents import SearchClient
-from azure.search.documents.indexes import SearchIndexClient
-from azure.search.documents.models import VectorizedQuery
-from azure.core.credentials import AzureKeyCredential, AccessToken
-import uuid
-from copy import deepcopy
+from azure.ai.agents.models import AzureAISearchTool
+from azure.ai.projects import AIProjectClient #, ConnectionType
+from azure.ai.projects.models import ConnectionType
+from azure.identity import DefaultAzureCredential
+from azure.core.exceptions import ResourceNotFoundError
 
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+# Load environment variables from .env file
+env_path = Path(__file__).parent.parent / '.env'
+load_dotenv(env_path)
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-#configure service connections
-aoai_endpoint   = os.environ["Azure_OpenAI_Endpoint"]
-aoai_key        = os.environ["Azure_OpenAI_Key"]
-aoai_deployment = "gpt-4o"                      
-api_version     = "2024-12-01-preview"  
-
-
-aoai_client = AzureOpenAI(
-    api_key=aoai_key,
-    azure_endpoint=aoai_endpoint,
-    api_version=api_version,
-)
-
-search_endpoint = os.environ["Azure_Search_Endpoint"]
-search_admin_key = os.environ["Azure_Search_Key"]
-index_name = os.environ["Azure_Search_Index_Name"]
-embedding_deployment = os.environ["Azure_OpenAI_Embedding_Deployment_Name"]
-vector_config = "arch-hnsw"
-azure_openai_embedding_dimensions = 3072
-
-search_client = SearchClient(
-    endpoint=search_endpoint,
-    index_name=index_name,
-    credential=AzureKeyCredential(search_admin_key)
-)
-
-NUM_SEARCH_RESULTS = 5
-K_NEAREST_NEIGHBORS = 30
-
-
-rag_system_prompt = """
-You are an AI assistant that helps people find the closest software architecture matching their use case requirements. You should explain in detail what exactly in the user requirements is being covered by the recommended architecture and what is not being covered. 
-"""
-
-intake_agent_system_prompt = """
-You are the intake agent for a software architecture recommendation system. Your job is to initiate a conversation with the user and ask them the technical requirements of their use case. Their use case could be related to the deployment of an application on cloud, migration of a workload from on-prem to cloud or some database/data engineering workload. Try to extract as much details from the user as possible on thier use case before leveraging the JSON schema tools defined.
-If you have enough requirements from users on their requirements, call the json-schema of the rag_results tool in order to return the closest match to the user's requirements of an approved architecture from the inventory. If you don't have enough technical requirements from the user then continue the conversation and ask the users to provide further details regarding their use case. 
-• You can talk normally, or you can call the JSON‑schema tools I’ve defined.
-• ONLY call a tool when it is needed for up‑to‑date, factual, or transactional data
-  that you can’t reasonably hallucinate (e.g. live weather, stock quotes, DB lookups).
-• When you *do* call a tool, respond with **nothing but** the tool_call block—no prose.
-• If no tool is needed, answer conversationally and do **not** include a tool_call.
-• Never invent tool names or parameters that were not provided in the `tools` array.
-"""
-
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "run_search",
-            "description": "Return the search results for the technical requirements specified by the user.",
-            "parameters": {
-                "type": "object",
-                "properties": { "user_query": { "type": "string" }, "category_filter": { "type": "string" } },
-                "required": ["user_query"],
-            },
-        },
-    }
-]
-
-def run_search(search_query: str, category_filter: str | None = None) -> Tuple[str, List[Dict[str, str]]]:
-    """
-    Perform a search using Azure Cognitive Search with both semantic and vector queries.
-    Returns the results as a formatted string.
-    """
-    # Generate vector embedding for the query
-    query_vector = aoai_client.embeddings.create(
-        input=[search_query],
-        model=embedding_deployment
-    ).data[0].embedding
-
-    # Create the vector query
-    vector_query = VectorizedQuery(
-        vector=query_vector,
-        k_nearest_neighbors=K_NEAREST_NEIGHBORS,
-        fields="content_vector"
-    )
+class IntakeAgent:
+    """Azure AI Agent for recommending software architectures based on user requirements."""
     
-    # Create filter combining processed_ids and category filter
-    filter_parts = []
-    if category_filter:
-        filter_parts.append(f"({category_filter})")
-    filter_str = " and ".join(filter_parts) if filter_parts else None
+    def __init__(self):
+        self.client: Optional[AIProjectClient] = None
+        self.agent_id: Optional[str] = None
+        self.threads: Dict[str, str] = {}  # thread_id -> thread_id mapping
+        self._initialized = False
+        
+        # Azure configuration from environment
+        self.azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        self.project_connection_string = os.getenv("AZURE_AI_PROJECT_CONNECTION_STRING")
+        self.model_deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4")
+        self.search_index_name = os.getenv("AZURE_AI_SEARCH_INDEX_NAME", "software-architecture-index")
+        
+        if not self.project_connection_string:
+            raise ValueError("AZURE_AI_PROJECT_CONNECTION_STRING is required in environment variables")
 
-    # Perform the search
-    results = search_client.search(
-        search_text=search_query,
-        vector_queries=[vector_query],
-        filter=filter_str,
-        select=["id", "content", "name", "architecture_url"],
-        top=NUM_SEARCH_RESULTS
-    )
+    @classmethod
+    async def create(cls) -> "IntakeAgent":
+        """Factory method to create and initialize an IntakeAgent instance."""
+        instance = cls()
+        await instance._async_init()
+        return instance
     
-    # Format the search results into a string
-    output_parts = ["\n=== Search Results ==="]
-    architecture_result_urls = []
-    for i, result in enumerate(results, 1):
-        result_parts = [
-            f"\nResult #{i}",
-            "=" * 80,
-            f"ID: {result['id']}",
-            f"Name: {result['name']}",
-            f"Architecture URL: {result['architecture_url']}",            
-            f"Score: {result['@search.score']}",
-            "\n<Start Content>",
-            "-" * 80,
-            result['content'],
-            "-" * 80,
-            "<End Content>"
-        ]
-        output_parts.extend(result_parts)
-        architecture_result_urls.append({"name": result['name'], "architecture_url": result['architecture_url']})
-    
-    formatted_output = "\n".join(output_parts)
-    return formatted_output, architecture_result_urls
+    async def _async_init(self):
+        """Asynchronous initialization of the Azure AI Agent."""
+        try:
+            logger.info("Initializing Azure AI Agent...")
+            
+            # Create Azure AI Project client with managed identity
+            credential = DefaultAzureCredential()
+            self.client = AIProjectClient(
+                endpoint=self.project_connection_string,
+                credential=credential
+            )
+            
+            # Find Azure AI Search connection
+            ai_search_conn_id = self._find_search_connection()
+            
+            if not ai_search_conn_id:
+                logger.warning("No Azure AI Search connection found. Creating agent without search capabilities.")
+                # Create agent definition without tools
+                agent_definition = self.client.agents.create_agent(
+                    model=self.model_deployment_name,
+                    name="Software Architecture Recommender",
+                    instructions=self._get_agent_instructions(),
+                    headers={"x-ms-enable-preview": "true"},
+                )
+            else:
+                logger.info(f"Found Azure AI Search connection: {ai_search_conn_id}")
+                
+                # Create agent definition with Azure AI Search tool and proper tool_resources
+                ai_search = AzureAISearchTool(index_connection_id=ai_search_conn_id, index_name=self.search_index_name)
 
-def get_rag_results(user_query: str, search_results: str, system_prompt: str, conversation_history: List[Dict[str, str]]) -> Tuple[str, List[Dict[str, str]]]:
-    """
-    Constructs the AOAI user message using the user query, search results, system prompt, and conversation history,
-    then invokes the AOAI client to get the RAG results.
-    """
-    # Format the conversation history into a readable string
-    history_string = "\n".join(
-        [f"{entry['role'].capitalize()}: {entry['content']}" for entry in conversation_history]
-    )
+                agent_definition = self.client.agents.create_agent(
+                    model=self.model_deployment_name,
+                    name="Software Architecture Recommender",
+                    instructions=self._get_agent_instructions(),
+                    tools=ai_search.definitions,
+                    tool_resources=ai_search.resources,
+                    headers={"x-ms-enable-preview": "true"},
+                )
 
-    # Construct the user message
-    user_message = f"""
-    Conversation History:
-    {history_string}
+            self.agent_id = agent_definition.id
+            self._initialized = True
+            logger.info(f"Azure AI Agent initialized successfully with ID: {self.agent_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize Azure AI Agent: {str(e)}")
+            raise
 
-    User Query:
-    {user_query}
+    def _find_search_connection(self) -> Optional[str]:
+        """Find and return the Azure AI Search connection ID."""
+        try:
+            for connection in self.client.connections.list():
+                if connection.type == ConnectionType.AZURE_AI_SEARCH:
+                    logger.info(f"Found Azure AI Search connection: {connection.name}")
+                    return connection.id
+        except Exception as e:
+            logger.error(f"Error finding search connection: {str(e)}")
+        return None
 
-    Search Results:
-    {search_results}
-    """
+    def _get_agent_instructions(self) -> str:
+        """Get the system instructions for the agent."""
+        return """You are a software architecture expert specializing in providing tailored recommendations 
+        based on user requirements. Your role is to:
 
-    # Invoke AOAI client to get the RAG results
-    response = aoai_client.chat.completions.create(
-        model=aoai_deployment,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
-        ],
-        max_tokens=3000,
-        temperature=0.7
-    )
+        1. Analyze user requirements for software projects
+        2. Recommend appropriate architectural patterns and technologies
+        3. Consider factors like scalability, maintainability, performance, and cost
+        4. Provide specific Azure services recommendations when applicable
+        5. Explain the reasoning behind your recommendations
 
-    # Extract and return the RAG result from the response
-    rag_result = response.choices[0].message.content
-    history = deepcopy(conversation_history) if conversation_history else []
-    history.append({"role": "assistant", "content": rag_result})
+        When users ask about software architecture:
+        - Ask clarifying questions about requirements, scale, and constraints
+        - Provide multiple options with pros and cons
+        - Consider both current needs and future growth
+        - Include implementation guidance and best practices
+        - Use the available search index to find relevant architectural examples
 
-    return rag_result, history
+        Be comprehensive but concise in your responses."""
 
-def chat_with_intake_agent(user_query: str, conversation_history: List[Dict[str, str]]) -> Tuple[str, List[Dict[str, str]], Dict[str, Any]]:
-    """
-    Sends the user_query plus prior conversation_history to AOAI and returns:
-      • assistant_response – text from the model
-      • updated_history    – history with the new user & assistant turns appended
-    """
-    #Build / extend history --------------------------------------------
-    history = deepcopy(conversation_history) if conversation_history else []
+    async def query(self, user_query: str, thread_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Process a user query and return the agent's response.
+        
+        Args:
+            user_query: The user's question or request
+            thread_id: Optional thread ID for conversation continuity
+            
+        Returns:
+            Dictionary containing the response and metadata
+        """
+        if not self._initialized:
+            raise RuntimeError("Agent not initialized. Use IntakeAgent.create() to create an instance.")
+        
+        try:
+            # Get or create thread
+            thread_id = await self._get_or_create_thread(thread_id)
+            
+            # Add user message to thread
+            self.client.agents.messages.create(
+                thread_id=thread_id,
+                role="user",
+                content=user_query
+            )
+            
+            # Create and poll run
+            run = self.client.agents.runs.create_and_process(
+                thread_id=thread_id,
+                agent_id=self.agent_id
+            )
+            # Get the assistant's messages from the thread
+            messages = self.client.agents.messages.list(thread_id=thread_id)
+            
+            assistant_response = "I'm sorry, I couldn't generate a response. Please try again."
+            # Convert ItemPaged to list and get the latest assistant message
+            messages_list = list(messages)
+            if messages_list:
+                # Messages are typically returned in reverse chronological order (newest first)
+                for message in messages_list:
+                    if message.role == "assistant":
+                        # Extract text content from the message
+                        for content in message.content:
+                            if hasattr(content, 'text') and hasattr(content.text, 'value'):
+                                assistant_response = content.text.value
+                                break
+                        break
+            
+            return {
+                "assistant_response": assistant_response,
+                "thread_id": thread_id,
+                "status": "success"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing query: {str(e)}")
+            return {
+                "assistant_response": f"An error occurred while processing your request: {str(e)}",
+                "thread_id": thread_id,
+                "status": "error"
+            }
 
-    history_string = "\n".join(
-        [f"{entry['role'].capitalize()}: {entry['content']}" for entry in conversation_history]
-    )
+    async def _get_or_create_thread(self, thread_id: Optional[str] = None) -> str:
+        """Get existing thread or create a new one."""
+        if thread_id and thread_id in self.threads:
+            return self.threads[thread_id]
+        
+        # Create new thread
+        thread = self.client.agents.threads.create()
+        thread_id = thread.id
+        self.threads[thread_id] = thread_id
+        
+        logger.info(f"Created new thread: {thread_id}")
+        return thread_id
 
-    user_message = f"""
-    Conversation History:
-    {history_string}
+    async def cleanup(self):
+        """Clean up resources."""
+        try:
+            if self.agent_id and self.client:
+                # Delete the agent
+                self.client.agents.delete_agent(self.agent_id)
+                logger.info("Agent deleted successfully")
+            
+            # Clear threads
+            self.threads.clear()
+            
+        except Exception as e:
+            logger.error(f"Error during cleanup: {str(e)}")
 
-    User Query:
-    {user_query}
-    """
-
-    history.append({"role": "user", "content": user_query})
-
-    #Call Azure OpenAI ---------------------------------------------------
-    response = aoai_client.chat.completions.create(
-        model=aoai_deployment,
-        messages=[
-            {"role": "system", "content": intake_agent_system_prompt},
-            {"role": "user", "content": user_message}
-        ],
-        max_tokens=1500,
-        temperature=0.7,
-        tools=tools,
-        tool_choice="auto"
-    )
-    assistant_response = response.choices[0].message.content
-    assistant_response_tool = json.loads(response.choices[0].message.tool_calls[0].function.arguments) if response.choices[0].message.tool_calls else None
-
-    #Update history with assistant turn ---------------------------------
-    history.append({"role": "assistant", "content": assistant_response if assistant_response else ""})
-
-    return assistant_response, history, assistant_response_tool
-
-
-if __name__ == "__main__":
-    #print("Starting intake agent...")
-    #search_results = run_search(search_query="What is the architecture of Azure OpenAI?", category_filter=None)
-    conversation_history = [{'role': 'user', 'content': 'I have a batc ingestion use case with reasonaly large data volumes. The batch process must run daily, ingest CSV files into a cloud data lake as is and be able to scale up and down. I am looking for an architecture that can help me with this use case. Can you help me with this?'}, {'role': 'assistant', 'content': 'Thank you for sharing the requirements! To ensure I provide you with the most suitable architecture recommendation for your batch ingestion use case, I need to gather a few more technical details:\n\n1. **Cloud Provider**: Do you have a preferred cloud provider (e.g., AWS, Azure, Google Cloud)?\n   \n2. **Data Lake**: Are you using a specific data lake service (e.g., Amazon S3, Azure Data Lake, Google Cloud Storage) or is this flexible?\n\n3. **Data Volume**: When you say "reasonably large data volumes," could you provide an estimate (e.g., GB per file, total GB per day)?\n\n4. **File Format**: Are the CSV files structured consistently or do they vary in schema? Are there any specific transformations needed post-ingestion?\n\n5. **Processing Framework**: Do you have a preference for a processing framework (e.g., Apache Spark, serverless options like AWS Lambda, or others)?\n\n6. **Cost Efficiency**: Is cost optimization a primary concern, or is performance/scalability the priority?\n\n7. **Security & Compliance**: Any specific compliance or security requirements (e.g., encryption, IAM policies)?\n\n8. **Future Needs**: Do you foresee needing to process data in real-time in the future, or is this strictly for batch processing?\n\nProviding these details will help me find the most appropriate architecture recommendation for your use case!'}]
-    user_query = "Yes, my preferred cloud provider is Azure. I am using Azure Data Lake and the data volume is around 1TB per day. The files are structured consistently and I do not need any transformations. I would prefer a serverless option for processing. Cost efficiency is a primary concern for me. I do not have any specific compliance or security requirements. I do not foresee needing to process data in real-time in the future."
-    assistant_response, history, assistant_response_tool = chat_with_intake_agent(user_query, conversation_history)
-    print("\n=== Assistant Response ===")
-    print(assistant_response)
-    search_result_str, architecture_result_urls = run_search(search_query=assistant_response_tool["user_query"], category_filter=None)
-    print("\n=== RAG Results ===")
-    rag_result, history = get_rag_results(user_query=assistant_response_tool["user_query"], search_results=search_result_str, system_prompt=rag_system_prompt, conversation_history=history)
-    print(rag_result)
-    print("\n=== Updated Conversation History ===")
-    for entry in history:
-        print(entry)
-    #rag_result = get_rag_results(user_query="What is the architecture of Azure OpenAI?", search_results=search_results, system_prompt=rag_system_prompt, conversation_history=conversation_history)
-    # Print the RAG results
-    #print("\n=== RAG Result ===")
-    #print(rag_result)
+    def __del__(self):
+        """Destructor to ensure cleanup."""
+        if self._initialized and self.agent_id:
+            try:
+                asyncio.create_task(self.cleanup())
+            except Exception:
+                pass  # Ignore errors during cleanup in destructor
