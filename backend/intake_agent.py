@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 
 class IntakeAgent:
     """Azure AI Agent for recommending software architectures based on user requirements."""
-    
     def __init__(self):
         self.client: Optional[AIProjectClient] = None
         self.agent_id: Optional[str] = None
+        self.ai_search_tool: Optional[AzureAISearchTool] = None  # Store the search tool
         self.threads: Dict[str, str] = {}  # thread_id -> thread_id mapping
         self._initialized = False
         
@@ -75,14 +75,14 @@ class IntakeAgent:
                 logger.info(f"Found Azure AI Search connection: {ai_search_conn_id}")
                 
                 # Create agent definition with Azure AI Search tool and proper tool_resources
-                ai_search = AzureAISearchTool(index_connection_id=ai_search_conn_id, index_name=self.search_index_name)
+                self.ai_search_tool = AzureAISearchTool(index_connection_id=ai_search_conn_id, index_name=self.search_index_name)
 
                 agent_definition = self.client.agents.create_agent(
                     model=self.model_deployment_name,
                     name="Software Architecture Recommender",
                     instructions=self._get_agent_instructions(),
-                    tools=ai_search.definitions,
-                    tool_resources=ai_search.resources,
+                    tools=self.ai_search_tool.definitions,
+                    tool_resources=self.ai_search_tool.resources,
                     headers={"x-ms-enable-preview": "true"},
                 )
 
@@ -123,6 +123,7 @@ You are a software architecture expert operating within a controlled enterprise 
       “I don’t have enough information to answer that based on the current knowledge base.”
     - Do not fabricate, speculate, or rely on general knowledge.
     - Do not reference or imply access to external sources unless explicitly retrieved.
+    - Do NOT reference or imply any source available on the internet or public articles
 
   When users ask about software architecture:
     - Ask clarifying questions about requirements, scale, and constraints.
@@ -160,13 +161,20 @@ You are a software architecture expert operating within a controlled enterprise 
                 thread_id=thread_id,
                 role="user",
                 content=user_query
-            )
-            
-            # Create and poll run
-            run = self.client.agents.runs.create_and_process(
-                thread_id=thread_id,
-                agent_id=self.agent_id
-            )
+            )            # Create and poll run with tool_choice to force AI Search usage
+            if self.ai_search_tool:
+                # Option 1: Force use of AI Search tool specifically
+                run = self.client.agents.runs.create_and_process(
+                    thread_id=thread_id,
+                    agent_id=self.agent_id,
+                    tool_choice="required"  # Forces use of available tools (AI Search only)
+                )
+            else:
+                # No search tool available, run without tool restrictions
+                run = self.client.agents.runs.create_and_process(
+                    thread_id=thread_id,
+                    agent_id=self.agent_id
+                )
             # Get the assistant's messages from the thread
             messages = self.client.agents.messages.list(thread_id=thread_id)
             
