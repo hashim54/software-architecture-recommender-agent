@@ -116,3 +116,4 @@ scripts/*.tmp
 # Ignore data output
 /data/
 .env
+.env
